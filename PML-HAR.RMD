@@ -1,0 +1,197 @@
+---
+title: "Practical Machine Learning Project"
+author: "Sudhir Ghiya"
+date: "Friday, April 08, 2016"
+output: html_document
+---
+#**Human Activity Recognition**
+## Executive Summary 
+Human Activity Recognition - HAR - has emerged as a key research area in the last years and is gaining increasing attention by the pervasive computing research community (see picture below, that illustrates the increasing number of publications in HAR with wearable accelerometers), especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises.
+
+###Details of Weight Lifting Exercises Dataset
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Read more: (http://groupware.les.inf.puc-rio.br/har#ixzz44vlDAJfT)
+
+## Project Instructions
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.  
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.  
+
+
+###Load of Libraries Required
+
+```{r cache=TRUE, warning=FALSE, message=FALSE, error=FALSE}
+library(lattice, quietly = TRUE, warn.conflicts=FALSE); 
+library(ggplot2, quietly = TRUE, warn.conflicts=FALSE);
+library(caret, quietly = TRUE, warn.conflicts=FALSE); 
+library(kernlab, quietly = TRUE, warn.conflicts=FALSE); 
+
+# libraries for train
+library(randomForest, quietly=TRUE, warn.conflicts=FALSE) # w/ method = "rf"
+library(arm, quietly=TRUE, warn.conflicts=FALSE)        # w/ method = "bayesglm"
+library(MASS, quietly=TRUE, warn.conflicts=FALSE)       # 
+library(Matrix, quietly=TRUE, warn.conflicts=FALSE)     # required by lme4
+library(lme4, quietly=TRUE, warn.conflicts=FALSE)       # w/ method = "lmer", "glmer", "nlmer"
+library(caTools, quietly=TRUE, warn.conflicts=FALSE)    # w/ method = ""
+library(rpart, quietly=TRUE, warn.conflicts=FALSE)      # w/ method = "rpart"
+library(nnet, quietly=TRUE, warn.conflicts=FALSE)       # w/ method = "nnet"
+
+# libraries for Parallel Processing
+library(foreach, warn.conflicts=FALSE)
+library(iterators, warn.conflicts=FALSE)
+library(parallel, warn.conflicts=FALSE);
+library(doParallel, warn.conflicts=FALSE);
+
+# get # Cores in CPU and activate Parallel Clusters
+cluster <- makeCluster(detectCores());
+registerDoParallel(cluster);
+```
+
+### Getting and Cleaning Data
+We will now read in the Training and Test Data Set.
+```{r cache=TRUE,warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(12345)
+
+if (file.exists("pml-training.csv")) {
+  dataset <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+} else { 
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml-training.csv")
+  dataset <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+}                           
+
+if (file.exists("pml-testing.csv")) {
+  testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+} else { 
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+  testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+}   
+
+#
+# We will remove first 7 cols which are X, user_name, raw_timestamp_part_1, 
+# raw_timestamp_part_2, cvtd_timestamp, new_window, num_window 
+#
+dataset<-dataset[,8:160]
+testing<-testing[,8:160]
+
+# Remove Columns where not much data is available to perform worthwile analysis
+
+# get #rows and use it to 
+
+all_data <- apply(!is.na(dataset),2,sum) > dim(dataset)[1]-1
+
+dataset<-dataset[,all_data]
+testing<-testing[,all_data]
+```
+
+```{r cache=TRUE, echo=TRUE}
+dim(training)
+```
+
+### Creation of Partion to do Training
+Now partition the dataset into a smaller set [training] to improve the the model build.
+
+```{r cache=TRUE,warning=FALSE, message=FALSE}
+InTrain<-createDataPartition(y=dataset$classe,p=0.3,list=FALSE)
+training<-dataset[InTrain,]
+```
+
+### Correlation Analysis
+We have the following columns/attributes which suggest a high degree of Co-Relation amongst them.
+```{r cache=TRUE}
+correlation <- findCorrelation(cor(training[, 1:52]), cutoff=0.80)
+correlationMatrix <- data.frame(cor(training[, 1:52]))
+names(training)[correlation]
+```
+Many variables are highly correlated. PCA will be used in the pre-processing. 
+
+### Model Generation
+Now use the Method "RandomForest" to generate the Train Model. (See Appendix for further Models tested and Accuracy results)
+
+``` {r cache=TRUE,eval=FALSE,echo=TRUE}
+# Set PCA
+tC <- trainControl(method="cv", number=5, verboseIter=F, preProcOptions="pca", allowParallel=T) 
+# Train Model (Random Forest)
+fit.rf        <- train(classe ~ ., data = training, method="rf", prox=TRUE,allowParallel=TRUE)
+save(fit.rf, file="fit_rf.RData")
+```
+
+### Confusion Matrix for Model (Random Forest) being used.
+We get a good accuracy of approx 97.70% using the Random Forest.
+```{r cache=TRUE,echo=TRUE}
+print(fit.rf)
+print(fit.rf$finalModel)
+```
+
+### Required Project Outcome  
+#### Predictions for test data set (20 recordings)
+``` {r cache=TRUE,echo=TRUE}
+rfPred <- predict(fit.rf, test)
+rfPred
+```
+
+------
+# Appendix
+
+### Principal Components Analysis (Random Forest Model)
+```{r cache=TRUE, warning=FALSE,echo=TRUE}
+varImpPlot(fit.rf$finalModel, sort=TRUE, cex = 0.8)
+```
+
+### Pre-Processing & Cross Validation Settings (for Other Models) tried out
+```{r cache=TRUE, warning=FALSE, eval=FALSE, echo=TRUE}
+# Pre-Processing & Cross Validation Settings
+tC <- trainControl(method="cv", number=5, verboseIter=F, preProcOptions="pca", allowParallel=T) 
+
+# Other Models tried out.
+# ---- svmRadial
+fit.svmr       <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "svmRadial")
+save(fit.svmr, file="fit_svmr.RData")
+
+# ---- nnet
+fit.NN         <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "nnet")
+save(fit.NN, file="fit_NN.RData")
+
+# ---- svmLinear
+fit.svml       <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "svmLinear")
+save(fit.svml, file="fit_svml.RData")
+
+# ---- LogitBoost
+fit.logitboost <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "LogitBoost")
+save(fit.logitboost, file="fit_logitboost.RData")
+
+# ---- bayesglm
+# fit.bayesglm   <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "bayesglm")
+# save(fit.bayesglm, file="fit_bayesglm.RData")
+#
+# # ---- rpart
+# fit.rpart      <- train(classe ~ ., data = training, trControl=tC, verbose=FALSE, method = "rpart")
+# save(fit.rpart, file="fit_rpart.RData")
+```
+
+### Comparing Model Accuracy
+On Comparing the Model's Acurracy, have concluded the Random Forest gives a decent result.
+
+```{r cache=TRUE, warning=FALSE, echo=TRUE}
+model <- c("Random Forest", "SVM (radial)","LogitBoost","SVM (linear)","Neural Net") # ,"bayesglm", "rpart"
+Accuracy <- c( max(fit.rf$results$Accuracy)
+              ,max(fit.svmr$results$Accuracy)
+              ,max(fit.logitboost$results$Accuracy)
+              ,max(fit.svml$results$Accuracy)
+              ,max(fit.NN$results$Accuracy))
+            # ,max(fit.bayesglm$results$Accuracy))
+            # ,max(fit.rpart$results$Accuracy))
+
+Kappa <- c( max(fit.rf$results$Kappa)
+           ,max(fit.svmr$results$Kappa)
+           ,max(fit.logitboost$results$Kappa)
+           ,max(fit.svml$results$Kappa)
+           ,max(fit.NN$results$Kappa))
+           # ,max(fit.bayesglm$results$Kappa)
+           # ,max(fit.rpart$results$Kappa))
+
+performance <- cbind(model,Accuracy,Kappa)
+performance
+```
+
+### Citations
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
